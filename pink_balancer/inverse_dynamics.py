@@ -11,12 +11,13 @@ class InverseDynamics:
     def __init__(self):
         """Initialize the robot model."""
         self.robot = upkie_description.load_in_pinocchio(
-                        root_joint=pin.JointModelFreeFlyer()
-                    )
+            root_joint=pin.JointModelFreeFlyer()
+        )
 
     @cache
-    def get_leg_idx(self, leg: Literal["left", "right"],
-                    base_offset: Literal[0, 6, 7]) -> tuple[int]:
+    def get_leg_idx(
+        self, leg: Literal["left", "right"], base_offset: Literal[0, 6, 7]
+    ) -> tuple[int]:
         """Get the index of the leg.
 
         Args:
@@ -30,8 +31,13 @@ class InverseDynamics:
         """
         joint_idx = []
 
-        for joint in self.robot.joints:
-            if joint.name.startswith(leg):
-                joint_idx.append(joint.idx)
+        # remove the 2 first joints (root and floating base)
+        offset = base_offset - 2
+
+        # print joint idx and names
+        for joint_name in self.model.names:
+            if leg in joint_name:
+                joint_id = self.model.getJointId(joint_name)
+                joint_idx.append(joint_id + offset)
 
         return tuple(joint_idx)
