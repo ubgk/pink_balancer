@@ -1,38 +1,72 @@
-from functools import cache
-from typing import Literal
+from functools import cache, cached_property
+from typing import Literal, Optional, cast
 
 import numpy as np
-import pinocchio as pin
-import upkie_description
+import pinocchio as pin  # type: ignore
+import upkie_description  # type: ignore
 
 
 class InverseDynamics:
     """Compute the inverse dynamics of the robot."""
+
     def __init__(self):
         """Initialize the robot model."""
         self.robot = upkie_description.load_in_pinocchio(
             root_joint=pin.JointModelFreeFlyer()
         )
 
+        self.model = self.robot.model
+        self.data = self.robot.data
+
+        self.base_name = "base"
+
+        # Contact frames, we don't care about wheels now and assume the \
+        # robot is standing on flat ground.
+        self.left_foot_frame = "left_anchor"
+        self.right_foot_frame = "right_anchor"
+
+    @cached_property
+    def base_idx_q(self) -> list[int]:
+        """Get the index of the base joints in the configuration space.
+
+        Returns:
+            The index of the base joints.
+        """
+        return [i for i in range(7)]
+
+    @cached_property
+    def base_idx_v(self) -> list[int]:
+        """Get the index of the base joints in the velocity space.
+
+        Returns:
+            The index of the base joints.
+        """
+        return [i for i in range(6)]
+
     @cache
     def get_leg_idx(
-        self, leg: Literal["left", "right"], base_offset: Literal[0, 6, 7]
-    ) -> tuple[int]:
+        self,
+        leg: Literal["left", "right"],
+        base_offset: Literal["no_base", "tangent", "config"] = "tangent",
+    ) -> list[int]:
         """Get the index of the leg.
 
         Args:
             leg: The leg name, either "left" or "right".
-            base_offset: The index offset of the base joint. 0 for no offset, \
-            6 if indices are desired for the tangent space and 7 if indices \
-            are desired for the configuration space.
+            base_offset: The index offset of the base joint. 'no_base' for no \
+                offset, 'tangent' if indices are desired for the tangent \
+                space and 'config' if indices are desired for the \
+                configuration space.
 
         Returns:
             The index of the leg joints
         """
         joint_idx = []
 
+        offset = {"no_base": 0, "tangent": 6, "config": 7}[base_offset]
+
         # remove the 2 first joints (root and floating base)
-        offset = base_offset - 2
+        offset = offset - 2
 
         # print joint idx and names
         for joint_name in self.model.names:
@@ -40,4 +74,130 @@ class InverseDynamics:
                 joint_id = self.model.getJointId(joint_name)
                 joint_idx.append(joint_id + offset)
 
-        return tuple(joint_idx)
+        return joint_idx
+
+    def compute(
+        self, q: np.ndarray, v: Optional[np.ndarray], a: Optional[np.ndarray]
+    ) -> np.ndarray:
+        """Compute the inverse dynamics of the robot.
+
+        Args:
+            q: The joint configuration.
+            v: The joint velocity.
+            a: The joint acceleration.
+
+        Returns:
+            The joint torques.
+        """
+        assert q.shape == (self.model.nq,), \
+            "Invalid joint configuration shape."
+
+        if v is not None:
+            assert v.shape == (self.model.nv,), \
+                "Invalid joint velocity shape."
+
+        if a is not None:
+            assert a.shape == (self.model.nv,), \
+                "Invalid joint acceleration shape."
+
+        # Update the robot state
+        pin.forwardKinematics(self.model, self.data, q, v, a)
+        pin.computeJointJacobians(self.model, self.data, q)
+
+        if self.is_null(a):
+            tau_l_M = np.zeros(3)
+        else:
+            # mypy hint: a is *always* np.ndarray if we get here
+            a = cast(np.ndarray, a)
+
+            # Get the reduced mass matrix M_l_lb (i.e., the mass matrix
+            # of the robot that maps the base and the chosen leg onto
+            # the chosen leg)
+            leg_idx = self.get_leg_idx("left", "tangent")
+
+            # M_l_lb s.t. M_l_lb * [a_b; a_l] = M_l * a_l + M_lb * a_b
+            M_l_lb = self.data.M[leg_idx, :][:, self.base_idx_v + leg_idx]
+
+            # Forces on the leg due to joint accelerations
+            tau_l_M = M_l_lb @ a[self.base_idx_v + leg_idx]
+
+        # Compute the non-linear effects (gravity, Coriolis, centrifugal)
+        tau_l_nle = self.data.nle[leg_idx]
+
+        return np.zeros(self.model.nv)
+
+    def contact_on_joints(self, q, v: Optional[np.ndarray],
+                          a: Optional[np.ndarray]) -> np.ndarray:
+        r"""Compute the contact forces and project them onto the joints.
+
+        This method computes $J^T_{fl} F_{fl}$, where $J_{fl}$ is the \
+        contact Jacobian and $F_{fl}$ is the contact force, as given in \
+        Eq. (5, 6) of the Hwangbo et al. paper.
+
+        Only point contacts are considered, so the contact forces are \
+        assumed to be linear forces (i.e., no torques).
+
+        Args:
+            q: The joint configurations.
+            v: The joint velocities (optional).
+            a: The joint accelerations (optional).
+
+        Returns:
+            The contact forces on the joints.
+        """
+        # Compute the contact Jacobians
+        # Assume only linear forces, no torques (i.e., 3D point contact)
+        foot_frame_id = self.model.getFrameId(self.left_foot_frame)
+        J_f = pin.computeFrameJacobian(
+            self.model, self.data, q,
+            foot_frame_id, pin.LOCAL_WORLD_ALIGNED)[:3] # (3, nv)
+
+        if not self.is_null(v):
+            # Compute the contact Jacobian time variation
+            Jdot_f = pin.computeFrameJacobianTimeVariation(
+                self.model, self.data, q, v,
+                foot_frame_id, pin.LOCAL_WORLD_ALIGNED)[:3] # (3, nv)
+
+        leg_idx = self.get_leg_idx("left", "tangent")
+
+        joint_forces = np.zeros(3)
+
+        if not self.is_null(v):
+            v = cast(np.ndarray, v)  # mypy hint: v is *always* np.ndarray here
+            joint_forces += Jdot_f.dot(v[self.base_idx_v + leg_idx])
+
+        if not self.is_null(a):
+            a = cast(np.ndarray, a)
+            joint_forces += Jdot_f.dot(a[self.base_idx_v + leg_idx])
+
+        # Project the contact forces onto the joints
+        J_fl = J_f[:3, leg_idx] # (3, 3)
+        J_fl_inv = np.linalg.pinv(J_fl) # (3, 3)
+
+        M_l = self.data.M[leg_idx, leg_idx] # (3, 3)
+
+
+        tau_contact =  M_l @ J_fl_inv @ joint_forces
+
+
+        return tau_contact
+
+
+    @staticmethod
+    def is_null(vec: Optional[np.ndarray]) -> bool:
+        """Check if a vector is null or NoneType.
+
+        Args:
+            vec: The vector to check.
+
+        Returns:
+            True if the vector is null or the argument is None,\
+                False otherwise.
+        """
+        if vec is None:
+            return True
+
+        return np.allclose(vec, 0)
+
+if __name__ == "__main__":
+    inverse_dynamics = InverseDynamics()
