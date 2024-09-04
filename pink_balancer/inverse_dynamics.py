@@ -78,7 +78,7 @@ class InverseDynamics:
 
     def compute(
         self, q: np.ndarray, v: Optional[np.ndarray], a: Optional[np.ndarray]
-    ) -> np.ndarray:
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Compute the inverse dynamics of the robot.
 
         Args:
@@ -87,7 +87,7 @@ class InverseDynamics:
             a: The joint acceleration.
 
         Returns:
-            The joint torques.
+            The joint torques, both with and without contact forces.
         """
         assert q.shape == (self.model.nq,), \
             "Invalid joint configuration shape."
@@ -124,7 +124,13 @@ class InverseDynamics:
         # Compute the non-linear effects (gravity, Coriolis, centrifugal)
         tau_l_nle = self.data.nle[leg_idx]
 
-        return np.zeros(self.model.nv)
+        # Compute the joint torques
+        tau_no_contact = tau_l_M + tau_l_nle
+
+        # Compute the contact forces and project them onto the joints
+        tau_contact = tau_no_contact + self.contact_on_joints(q, v, a)
+
+        return tau_no_contact, tau_contact
 
     def contact_on_joints(self, q, v: Optional[np.ndarray],
                           a: Optional[np.ndarray]) -> np.ndarray:
