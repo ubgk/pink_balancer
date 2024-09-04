@@ -21,8 +21,8 @@ class InverseDynamics:
 
         Args:
             leg: The leg name, either "left" or "right".
-            base_offset: The index offset of the base joint. 0 for no offset,
-            6 if indices are desired for the tangent space and 7 if indices
+            base_offset: The index offset of the base joint. 0 for no offset, \
+            6 if indices are desired for the tangent space and 7 if indices \
             are desired for the configuration space.
 
         Returns:
