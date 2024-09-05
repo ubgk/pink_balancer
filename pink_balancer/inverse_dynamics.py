@@ -158,6 +158,7 @@ class InverseDynamics:
         # Update the robot state
         pin.forwardKinematics(self.model, self.data, q, v, a)
         pin.computeJointJacobians(self.model, self.data, q)
+        pin.crba(self.model, self.data, q)
 
         # Compute the mass matrix
         pin.crba(self.model, self.data, q)
