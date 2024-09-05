@@ -168,25 +168,31 @@ class InverseDynamics:
         # (3, nv)
         ref_frame = pin.LOCAL_WORLD_ALIGNED
         foot_frame_id = self.model.getFrameId(self.left_foot_frame)
-        J_f = pin.computeFrameJacobian(
+        leg_idx = self.get_leg_idx("left", "tangent")
+
+        J = pin.computeFrameJacobian(
             self.model, self.data, q, foot_frame_id, ref_frame
         )
+
+        J_f = J[:3, self.base_idx_v + leg_idx]  # (3, 9)
+        J_fl = J_f[:3, leg_idx]  # (3, 3)
+
 
         if not self.is_null(v):
             # Compute the contact Jacobian time variation
             # (3, nv)
-            Jdot_f = pin.computeFrameJacobianTimeVariation(
+            Jdot = pin.frameJacobianTimeVariation(
                 self.model, self.data, q, v, foot_frame_id, ref_frame
-            )[:3]
+            ) # (6, nv)
 
-        leg_idx = self.get_leg_idx("left", "tangent")
+            Jdot_f = Jdot[:3, self.base_idx_v + leg_idx]  # (3, 6)
 
         joint_forces = np.zeros(3)
 
         if not self.is_null(v):
             v = cast(np.ndarray, v)  # mypy hint: v is *always* np.ndarray here
             joint_forces += Jdot_f.dot(v[self.base_idx_v + leg_idx])
-        
+
         if not self.is_null(a):
             a = cast(np.ndarray, a)
             joint_forces += J_f.dot(a[self.base_idx_v + leg_idx])
@@ -206,19 +212,18 @@ class InverseDynamics:
         # Populate the q, v, a arrays from the observation
         joint_idx = self.get_leg_idx("both", "tangent")
         for joint_id, joint_name in zip(joint_idx, self.joint_names):
-            if not (joint_name.startswith("left") or joint_name.startswith("right")):
-                continue
-            q = observation["servo"][joint_name]["position"]
-            v = observation["servo"][joint_name]["velocity"]
+            if joint_name.startswith("left") or joint_name.startswith("right"):
+                q = observation["servo"][joint_name]["position"]
+                v = observation["servo"][joint_name]["velocity"]
 
-            # Finite differences to compute the acceleration
-            a = v - self._v[joint_id] if dt > 0 else 0.0
-            a = a / dt
+                # Finite differences to compute the acceleration
+                a = v - self._v[joint_id] if dt > 0 else 0.0
+                a = a / dt
 
-            # Update the values
-            self._q[joint_id] = q
-            self._v[joint_id] = v
-            self._a[joint_id] = a
+                # Update the values
+                self._q[joint_id] = q
+                self._v[joint_id] = v
+                self._a[joint_id] = a
 
         # Fill in the base joint values
         self._q[:3] = 0.0  # We never know the base position
