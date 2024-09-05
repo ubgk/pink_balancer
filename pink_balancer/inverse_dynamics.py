@@ -115,6 +115,9 @@ class InverseDynamics:
         pin.forwardKinematics(self.model, self.data, q, v, a)
         pin.computeJointJacobians(self.model, self.data, q)
 
+        # Compute gravity
+        g = pin.computeGeneralizedGravity(self.model, self.data, q)
+
         if self.is_null(a):
             tau_l_M = np.zeros(3)
         else:
@@ -136,7 +139,7 @@ class InverseDynamics:
         tau_l_nle = self.data.nle[leg_idx]
 
         # Compute the joint torques
-        tau_no_contact = tau_l_M + tau_l_nle
+        tau_no_contact = tau_l_M + tau_l_nle + g[leg_idx]
 
         # Compute the contact forces and project them onto the joints
         tau_contact = tau_no_contact + self.contact_on_joints(q, v, a)
