@@ -30,9 +30,6 @@ class InverseDynamics:
         self._v = np.zeros(self.model.nv)
         self._a = np.zeros(self.model.nv)
 
-        # Save the timestamp
-        self.timestamp: float = -1.0
-
         # Initialize joint names
         self.joint_names = [name for name in self.model.names]
 
@@ -204,22 +201,17 @@ class InverseDynamics:
 
         return tau_contact
 
-    def cycle(self, observation: dict) -> dict:
+    def cycle(self, observation: dict, dt: float) -> dict:
         """Compute the inverse dynamics of the given leg."""
         # Populate the q, v, a arrays from the observation
-        new_timestamp = observation["time"]
-
-        if new_timestamp == self.timestamp:
-            raise ValueError(
-                "Duplicate timestamp! Did you call .cycle() twice?"
-            )
-
         joint_idx = self.get_leg_idx("both", "tangent")
         for joint_id, joint_name in zip(joint_idx, self.joint_names):
             q = observation[joint_name]["position"]
             v = observation[joint_name]["velocity"]
+
+            # Finite differences to compute the acceleration
             a = v - self._v[joint_id] if self.timestamp > 0 else 0.0
-            a = a / (new_timestamp - self.timestamp)
+            a = a / dt
 
             # Update the values
             self._q[joint_id] = q
@@ -240,16 +232,11 @@ class InverseDynamics:
         self._a[3:6] = 0.0
 
         # Compute the inverse dynamics
-        tau_no_contact, tau_contact = self.compute(
-            self._q, self._v, self._a
-        )
-
-        # Update the timestamp
-        self.timestamp = new_timestamp
+        tau_no_contact, tau_contact = self.compute(self._q, self._v, self._a)
 
         self._log_dict = {
             "tau_no_contact": tau_no_contact,
-            "tau_contact": tau_contact
+            "tau_contact": tau_contact,
         }
 
         return self._log_dict
