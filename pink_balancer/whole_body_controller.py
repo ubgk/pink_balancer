@@ -9,8 +9,8 @@ import gin
 from upkie.utils.clamp import clamp
 
 from .height_controller import HeightController
-from .wheel_controller import WheelController
 from .inverse_dynamics import InverseDynamics
+from .wheel_controller import WheelController
 
 
 @gin.configurable
