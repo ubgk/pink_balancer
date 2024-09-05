@@ -236,8 +236,8 @@ class InverseDynamics:
         self._v[3:6] = observation["imu"]["angular_velocity"]
 
         # Fill in the base acceleration values
-        self._a[:3] = 0.0
-        self._a[3:6] = observation["imu"]["angular_acceleration"]
+        self._a[:3] = observation["imu"]["linear_acceleration"]
+        self._a[3:6] = 0.0
 
         # Compute the inverse dynamics
         tau_no_contact, tau_contact = self.compute(
