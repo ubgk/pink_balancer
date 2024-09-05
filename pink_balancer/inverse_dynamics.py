@@ -25,6 +25,19 @@ class InverseDynamics:
         self.left_foot_frame = "left_anchor"
         self.right_foot_frame = "right_anchor"
 
+        # Initialize the state vectors
+        self._q = np.zeros(self.model.nq)
+        self._v = np.zeros(self.model.nv)
+        self._a = np.zeros(self.model.nv)
+
+        # Save the timestamp
+        self.timestamp: float = -1.0
+
+        # Initialize joint names
+        self.joint_names = [name for name in self.model.names]
+
+        self._log_dict = {}
+
     @cached_property
     def base_idx_q(self) -> list[int]:
         """Get the index of the base joints in the configuration space.
@@ -46,13 +59,13 @@ class InverseDynamics:
     @cache
     def get_leg_idx(
         self,
-        leg: Literal["left", "right"],
+        leg: Literal["left", "right", "both"],
         base_offset: Literal["no_base", "tangent", "config"] = "tangent",
     ) -> list[int]:
         """Get the index of the leg.
 
         Args:
-            leg: The leg name, either "left" or "right".
+            leg: The leg name, either "left", "right" or "both".
             base_offset: The index offset of the base joint. 'no_base' for no \
                 offset, 'tangent' if indices are desired for the tangent \
                 space and 'config' if indices are desired for the \
@@ -69,8 +82,8 @@ class InverseDynamics:
         offset = offset - 2
 
         # print joint idx and names
-        for joint_name in self.model.names:
-            if leg in joint_name:
+        for joint_name in self.joint_names:
+            if leg in joint_name or leg == "both":
                 joint_id = self.model.getJointId(joint_name)
                 joint_idx.append(joint_id + offset)
 
@@ -89,16 +102,17 @@ class InverseDynamics:
         Returns:
             The joint torques, both with and without contact forces.
         """
-        assert q.shape == (self.model.nq,), \
-            "Invalid joint configuration shape."
+        assert q.shape == (
+            self.model.nq,
+        ), "Invalid joint configuration shape."
 
         if v is not None:
-            assert v.shape == (self.model.nv,), \
-                "Invalid joint velocity shape."
+            assert v.shape == (self.model.nv,), "Invalid joint velocity shape."
 
         if a is not None:
-            assert a.shape == (self.model.nv,), \
-                "Invalid joint acceleration shape."
+            assert a.shape == (
+                self.model.nv,
+            ), "Invalid joint acceleration shape."
 
         # Update the robot state
         pin.forwardKinematics(self.model, self.data, q, v, a)
@@ -132,8 +146,9 @@ class InverseDynamics:
 
         return tau_no_contact, tau_contact
 
-    def contact_on_joints(self, q, v: Optional[np.ndarray],
-                          a: Optional[np.ndarray]) -> np.ndarray:
+    def contact_on_joints(
+        self, q: np.ndarray, v: Optional[np.ndarray], a: Optional[np.ndarray]
+    ) -> np.ndarray:
         r"""Compute the contact forces and project them onto the joints.
 
         This method computes $J^T_{fl} F_{fl}$, where $J_{fl}$ is the \
@@ -153,16 +168,19 @@ class InverseDynamics:
         """
         # Compute the contact Jacobians
         # Assume only linear forces, no torques (i.e., 3D point contact)
+        # (3, nv)
+        ref_frame = pin.LOCAL_WORLD_ALIGNED
         foot_frame_id = self.model.getFrameId(self.left_foot_frame)
         J_f = pin.computeFrameJacobian(
-            self.model, self.data, q,
-            foot_frame_id, pin.LOCAL_WORLD_ALIGNED)[:3] # (3, nv)
+            self.model, self.data, q, foot_frame_id, ref_frame
+        )
 
         if not self.is_null(v):
             # Compute the contact Jacobian time variation
+            # (3, nv)
             Jdot_f = pin.computeFrameJacobianTimeVariation(
-                self.model, self.data, q, v,
-                foot_frame_id, pin.LOCAL_WORLD_ALIGNED)[:3] # (3, nv)
+                self.model, self.data, q, v, foot_frame_id, ref_frame
+            )[:3]
 
         leg_idx = self.get_leg_idx("left", "tangent")
 
@@ -177,17 +195,68 @@ class InverseDynamics:
             joint_forces += Jdot_f.dot(a[self.base_idx_v + leg_idx])
 
         # Project the contact forces onto the joints
-        J_fl = J_f[:3, leg_idx] # (3, 3)
-        J_fl_inv = np.linalg.pinv(J_fl) # (3, 3)
+        J_fl = J_f[:3, leg_idx]  # (3, 3)
+        J_fl_inv = np.linalg.pinv(J_fl)  # (3, 3)
 
-        M_l = self.data.M[leg_idx, leg_idx] # (3, 3)
+        M_l = self.data.M[leg_idx, leg_idx]  # (3, 3)
 
-
-        tau_contact =  M_l @ J_fl_inv @ joint_forces
-
+        tau_contact = M_l @ J_fl_inv @ joint_forces
 
         return tau_contact
 
+    def cycle(self, observation: dict) -> dict:
+        """Compute the inverse dynamics of the given leg."""
+        # Populate the q, v, a arrays from the observation
+        new_timestamp = observation["time"]
+
+        if new_timestamp == self.timestamp:
+            raise ValueError(
+                "Duplicate timestamp! Did you call .cycle() twice?"
+            )
+
+        joint_idx = self.get_leg_idx("both", "tangent")
+        for joint_id, joint_name in zip(joint_idx, self.joint_names):
+            q = observation[joint_name]["position"]
+            v = observation[joint_name]["velocity"]
+            a = v - self._v[joint_id] if self.timestamp > 0 else 0.0
+            a = a / (new_timestamp - self.timestamp)
+
+            # Update the values
+            self._q[joint_id] = q
+            self._v[joint_id] = v
+            self._a[joint_id] = a
+
+        # Fill in the base joint values
+        self._q[:3] = 0.0  # We never know the base position
+        self._q[3:7] = observation["imu"]["orientation"]
+
+        # Fill in the base velocity values
+        self._v[:3] = 0.0  # We never know the base velocity
+        # (we could integrate but it would drift)
+        self._v[3:6] = observation["imu"]["angular_velocity"]
+
+        # Fill in the base acceleration values
+        self._a[:3] = 0.0
+        self._a[3:6] = observation["imu"]["angular_acceleration"]
+
+        # Compute the inverse dynamics
+        tau_no_contact, tau_contact = self.compute(
+            self._q, self._v, self._a
+        )
+
+        # Update the timestamp
+        self.timestamp = new_timestamp
+
+        self._log_dict = {
+            "tau_no_contact": tau_no_contact,
+            "tau_contact": tau_contact
+        }
+
+        return self._log_dict
+
+    def log(self) -> dict:
+        """Return the log dictionary."""
+        return self._log_dict
 
     @staticmethod
     def is_null(vec: Optional[np.ndarray]) -> bool:
@@ -204,6 +273,7 @@ class InverseDynamics:
             return True
 
         return np.allclose(vec, 0)
+
 
 if __name__ == "__main__":
     inverse_dynamics = InverseDynamics()
