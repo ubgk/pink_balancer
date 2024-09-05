@@ -268,6 +268,3 @@ class InverseDynamics:
 
         return np.allclose(vec, 0)
 
-
-if __name__ == "__main__":
-    inverse_dynamics = InverseDynamics()
