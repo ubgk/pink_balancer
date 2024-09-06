@@ -77,7 +77,7 @@ class InverseDynamics:
                 configuration space.
 
         Returns:
-            The index of the leg joints
+            List of joint indices of the leg.
         """
         joint_idx = []
 
