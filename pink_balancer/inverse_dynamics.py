@@ -1,3 +1,8 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+#
+# SPDX-License-Identifier: Apache-2.0
+
 from functools import cache, cached_property
 from typing import Literal, Optional, cast
 
