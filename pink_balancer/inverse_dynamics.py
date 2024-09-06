@@ -256,11 +256,12 @@ class InverseDynamics:
                 self.tau_measured[joint_id] = tau
 
         # Fill in the base joint values
-        self._q[:3] = 0.0  # We never know the base position
+        self._q[:3] = 0.0  # We don't observe the base position, and torques\
+            # are not affected by it
         self._q[3:7] = observation["imu"]["orientation"]
 
         # Fill in the base velocity values
-        self._v[:3] = 0.0  # We never know the base velocity
+        self._v[:3] = 0.0  # We don't observe the base velocity
         # (we could integrate but it would drift)
         self._v[3:6] = observation["imu"]["angular_velocity"]
 
