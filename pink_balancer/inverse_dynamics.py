@@ -11,6 +11,21 @@ import pinocchio as pin  # type: ignore
 import upkie_description  # type: ignore
 
 
+def is_null(vec: Optional[np.ndarray]) -> bool:
+    """Check if a vector is null or NoneType.
+
+    Args:
+        vec: The vector to check.
+
+    Returns:
+        True if the vector is null or the argument is None,\
+            False otherwise.
+    """
+    if vec is None:
+        return True
+
+    return np.allclose(vec, 0)
+
 class InverseDynamics:
     """Compute the inverse dynamics of the robot."""
 
@@ -126,7 +141,7 @@ class InverseDynamics:
         # Compute gravity
         g = pin.computeGeneralizedGravity(self.model, self.data, q)
 
-        if self.is_null(a):
+        if is_null(a):
             tau_l_M = np.zeros(3)
         else:
             # mypy hint: a is *always* np.ndarray if we get here
@@ -189,7 +204,7 @@ class InverseDynamics:
         J_fl = J_f[:3, leg_idx]  # (3, 3)
 
 
-        if not self.is_null(v):
+        if not is_null(v):
             # Compute the contact Jacobian time variation
             # (3, nv)
             Jdot = pin.frameJacobianTimeVariation(
@@ -200,11 +215,11 @@ class InverseDynamics:
 
         joint_forces = np.zeros(3)
 
-        if not self.is_null(v):
+        if not is_null(v):
             v = cast(np.ndarray, v)  # mypy hint: v is *always* np.ndarray here
             joint_forces += Jdot_f.dot(v[self.base_idx_v + leg_idx])
 
-        if not self.is_null(a):
+        if not is_null(a):
             a = cast(np.ndarray, a)
             joint_forces += J_f.dot(a[self.base_idx_v + leg_idx])
 
@@ -273,20 +288,4 @@ class InverseDynamics:
     def log(self) -> dict:
         """Return the log dictionary."""
         return self._log_dict
-
-    @staticmethod
-    def is_null(vec: Optional[np.ndarray]) -> bool:
-        """Check if a vector is null or NoneType.
-
-        Args:
-            vec: The vector to check.
-
-        Returns:
-            True if the vector is null or the argument is None,\
-                False otherwise.
-        """
-        if vec is None:
-            return True
-
-        return np.allclose(vec, 0)
 
