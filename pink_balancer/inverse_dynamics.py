@@ -30,6 +30,9 @@ class InverseDynamics:
         self._v = np.zeros(self.model.nv)
         self._a = np.zeros(self.model.nv)
 
+        # Initialize the measured torques
+        self.tau_measured = np.zeros(self.model.nv)
+
         # Initialize joint names
         self.joint_names = [name for name in self.model.names]
 
@@ -218,6 +221,7 @@ class InverseDynamics:
             if joint_name.startswith("left") or joint_name.startswith("right"):
                 q = observation["servo"][joint_name]["position"]
                 v = observation["servo"][joint_name]["velocity"]
+                tau = observation["servo"][joint_name]["torque"]
 
                 # Finite differences to compute the acceleration
                 a = v - self._v[joint_id] if dt > 0 else 0.0
@@ -227,6 +231,9 @@ class InverseDynamics:
                 self._q[joint_id] = q
                 self._v[joint_id] = v
                 self._a[joint_id] = a
+
+                # Update the measured torques
+                self.tau_measured[joint_id] = tau
 
         # Fill in the base joint values
         self._q[:3] = 0.0  # We never know the base position
@@ -244,9 +251,16 @@ class InverseDynamics:
         # Compute the inverse dynamics
         tau_no_contact, tau_contact = self.compute(self._q, self._v, self._a)
 
+        leg_idx = self.get_leg_idx("left", "tangent")
+
+        contact_error = tau_contact - self.tau_measured[leg_idx]
+        no_contact_error = tau_no_contact - self.tau_measured[leg_idx]
+
         self._log_dict = {
             "tau_no_contact": tau_no_contact,
             "tau_contact": tau_contact,
+            "contact_error": contact_error,
+            "no_contact_error": no_contact_error
         }
 
         return self._log_dict
