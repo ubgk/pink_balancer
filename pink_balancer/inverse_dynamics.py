@@ -61,19 +61,19 @@ class InverseDynamics:
 
     @cached_property
     def base_indices_q(self) -> list[int]:
-        """Get the index of the base joints in the configuration space.
+        """Get the indices of the base joints in the configuration space.
 
         Returns:
-            The index of the base joints.
+            The indices of the base joints.
         """
         return [i for i in range(7)]
 
     @cached_property
     def base_indices_v(self) -> list[int]:
-        """Get the index of the base joints in the velocity space.
+        """Get the indices of the base joints in the velocity space.
 
         Returns:
-            The index of the base joints.
+            The indices of the base joints.
         """
         return [i for i in range(6)]
 
@@ -83,7 +83,7 @@ class InverseDynamics:
         leg: Literal["left", "right", "both"],
         base_offset: Literal["no_base", "tangent", "config"] = "tangent",
     ) -> list[int]:
-        """Get the index of the leg.
+        """Get the indices of the leg.
 
         Args:
             leg: The leg name, either "left", "right" or "both".
@@ -102,11 +102,10 @@ class InverseDynamics:
         # remove the 2 first joints (root and floating base)
         offset = offset - 2
 
-        # print joint idx and names
         for joint_name in self.joint_names:
             if leg in joint_name or leg == "both":
                 joint_id = self.model.getJointId(joint_name)
-                joint_indices.append(joint_id + offset)
+                joint_indices.append(offset + joint_id)
 
         return joint_indices
 
