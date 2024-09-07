@@ -259,7 +259,11 @@ class InverseDynamics:
         # Fill in the base joint values
         self._q[:3] = 0.0  # We don't observe the base position, and torques\
         # are not affected by it
-        self._q[3:7] = observation["imu"]["orientation"]
+
+        # Both Pinocchio and the IMU use the same convention for quaternions
+        (x, y, z, w) = observation["imu"]["orientation"]  # quaternion
+        self._q[3:7] = [w, z, -y, -x] # IMU is mounted upside down. This is\
+        # equivalent to quaternion.to_matrix() * diag([1, -1, -1]).
 
         # Fill in the base velocity values
         self._v[:3] = 0.0  # We don't observe the base velocity
@@ -267,8 +271,9 @@ class InverseDynamics:
         self._v[3:6] = observation["imu"]["angular_velocity"]
 
         # Fill in the base acceleration values
-        self._a[:3] = observation["imu"]["linear_acceleration"]
-        self._a[3:6] = 0.0
+        dd_x, dd_y, dd_z = observation["imu"]["linear_acceleration"]
+        self._a[:3] = [dd_x, -dd_y, -dd_z]  # IMU is mounted upside down
+        self._a[3:6] = 0.0  # We don't observe the angular acceleration
 
         # Compute the inverse dynamics
         tau_no_contact, tau_contact = self.compute_torques(
