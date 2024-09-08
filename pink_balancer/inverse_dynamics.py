@@ -39,7 +39,7 @@ class InverseDynamics:
         self.model = self.robot.model
         self.data = self.robot.data
 
-        self.base_name = "base"
+        self.root_name = "root_joint"
 
         # Contact frames, we don't care about wheels now and assume the \
         # robot is standing on flat ground.
@@ -55,7 +55,8 @@ class InverseDynamics:
         self.tau_measured = np.zeros(self.model.nv)
 
         # Initialize joint names
-        self.joint_names = [name for name in self.model.names]
+        self.joint_names = [name for name in self.model.names
+                            if name != 'universe']
 
         # IMU is mounted upside down, so we need to transform all\
         # quantities to the correct frame.
@@ -71,7 +72,9 @@ class InverseDynamics:
         Returns:
             The indices of the base joints.
         """
-        return [i for i in range(7)]
+        joint = self.model.joints[self.model.getJointId(self.root_name)]
+
+        return [i for i in range(joint.idx_q, joint.nq)]
 
     @cached_property
     def base_indices_v(self) -> list[int]:
@@ -80,37 +83,42 @@ class InverseDynamics:
         Returns:
             The indices of the base joints.
         """
-        return [i for i in range(6)]
+        joint = self.model.joints[self.model.getJointId(self.root_name)]
+
+        return [i for i in range(joint.idx_v, joint.nv)]
 
     @cache
     def get_leg_indices(
         self,
         leg: Literal["left", "right", "both"],
-        base_offset: Literal["no_base", "tangent", "config"] = "tangent",
+        space: Literal["config", "tangent"] = "tangent",
     ) -> list[int]:
         """Get the indices of the leg.
 
         Args:
             leg: The leg name, either "left", "right" or "both".
-            base_offset: The index offset of the base joint. 'no_base' for no \
-                offset, 'tangent' if indices are desired for the tangent \
-                space and 'config' if indices are desired for the \
-                configuration space.
+            space: The space to get the indices from, either "config" or\
+                "tangent", which corresponds to the configuration and\
+                tangent spaces, respectively. Defaults to "tangent".
 
         Returns:
             List of joint indices of the leg.
         """
         joint_indices = []
 
-        offset = {"no_base": 0, "tangent": 6, "config": 7}[base_offset]
-
-        # remove the 2 first joints (root and floating base)
-        offset = offset - 2
-
         for joint_name in self.joint_names:
-            if leg in joint_name or leg == "both":
+            if leg in joint_name or\
+                  (leg == "both" and joint_name != "root_joint"):
                 joint_id = self.model.getJointId(joint_name)
-                joint_indices.append(offset + joint_id)
+                joint = self.model.joints[joint_id]
+
+                if space == "config":
+                    joint_indices.append(joint.idx_q)
+                elif space == "tangent":
+                    joint_indices.append(joint.idx_v)
+                else:
+                    raise ValueError(f"Invalid space: {space}! Must be\
+                                      'config' or 'tangent'.")
 
         return joint_indices
 
@@ -155,21 +163,21 @@ class InverseDynamics:
             # Get the reduced mass matrix M_l_lb (i.e., the mass matrix
             # of the robot that maps the base and the chosen leg onto
             # the chosen leg)
-            leg_indices = self.get_leg_indices("left", "tangent")
+            leg_indices_v = self.get_leg_indices("left", "tangent")
 
             # M_l_lb s.t. M_l_lb * [a_b; a_l] = M_l * a_l + M_lb * a_b
-            M_l_lb = self.data.M[leg_indices, :][
-                :, self.base_indices_v + leg_indices
+            M_l_lb = self.data.M[leg_indices_v, :][
+                :, self.base_indices_v + leg_indices_v
             ]
 
             # Forces on the leg due to joint accelerations
-            tau_l_M = M_l_lb @ a[self.base_indices_v + leg_indices]
+            tau_l_M = M_l_lb @ a[self.base_indices_v + leg_indices_v]
 
         # Compute the non-linear effects (gravity, Coriolis, centrifugal)
-        tau_l_nle = self.data.nle[leg_indices]
+        tau_l_nle = self.data.nle[leg_indices_v]
 
         # Compute the joint torques
-        tau_no_contact = tau_l_M + tau_l_nle + g[leg_indices]
+        tau_no_contact = tau_l_M + tau_l_nle + g[leg_indices_v]
 
         # Compute the contact forces and project them onto the joints
         tau_contact = tau_no_contact + self.contact_on_joints(q, v, a)
@@ -201,14 +209,14 @@ class InverseDynamics:
         # (3, nv)
         ref_frame = pin.LOCAL_WORLD_ALIGNED
         foot_frame_id = self.model.getFrameId(self.left_foot_frame)
-        leg_indices = self.get_leg_indices("left", "tangent")
+        leg_indices_v = self.get_leg_indices("left", "tangent")
 
         J = pin.computeFrameJacobian(
             self.model, self.data, q, foot_frame_id, ref_frame
         )
 
-        J_f = J[:3, self.base_indices_v + leg_indices]  # (3, 9)
-        J_fl = J_f[:3, leg_indices]  # (3, 3)
+        J_f = J[:3, self.base_indices_v + leg_indices_v]  # (3, 9)
+        J_fl = J_f[:3, leg_indices_v]  # (3, 3)
 
         if not is_null(v):
             # Compute the contact Jacobian time variation
@@ -217,23 +225,23 @@ class InverseDynamics:
                 self.model, self.data, q, v, foot_frame_id, ref_frame
             )  # (6, nv)
 
-            Jdot_f = Jdot[:3, self.base_indices_v + leg_indices]  # (3, 6)
+            Jdot_f = Jdot[:3, self.base_indices_v + leg_indices_v]  # (3, 6)
 
         joint_forces = np.zeros(3)
 
         if not is_null(v):
             v = cast(np.ndarray, v)  # mypy hint: v is *always* np.ndarray here
-            joint_forces += Jdot_f.dot(v[self.base_indices_v + leg_indices])
+            joint_forces += Jdot_f.dot(v[self.base_indices_v + leg_indices_v])
 
         if not is_null(a):
             a = cast(np.ndarray, a)
-            joint_forces += J_f.dot(a[self.base_indices_v + leg_indices])
+            joint_forces += J_f.dot(a[self.base_indices_v + leg_indices_v])
 
         # Project the contact forces onto the joints
-        J_fl = J_f[:3, leg_indices]  # (3, 3)
+        J_fl = J_f[:3, leg_indices_v]  # (3, 3)
         J_fl_inv = np.linalg.pinv(J_fl)  # (3, 3)
 
-        M_l = self.data.M[leg_indices, leg_indices]  # (3, 3)
+        M_l = self.data.M[leg_indices_v, leg_indices_v]  # (3, 3)
 
         tau_contact = M_l @ J_fl_inv @ joint_forces
 
@@ -242,24 +250,26 @@ class InverseDynamics:
     def cycle(self, observation: dict, dt: float) -> dict:
         """Compute the inverse dynamics of the given leg."""
         # Populate the q, v, a arrays from the observation
-        joint_indices = self.get_leg_indices("both", "tangent")
-        for joint_id, joint_name in zip(joint_indices, self.joint_names):
-            if joint_name.startswith("left") or joint_name.startswith("right"):
-                q = observation["servo"][joint_name]["position"]
-                v = observation["servo"][joint_name]["velocity"]
-                tau = observation["servo"][joint_name]["torque"]
 
-                # Finite differences to compute the acceleration
-                a = v - self._v[joint_id] if dt > 0 else 0.0
-                a = a / dt
+        leg_indices_q = self.get_leg_indices("both", "config")
+        leg_indices_v = self.get_leg_indices("both", "tangent")
+        for joint_name, joint_idx_q, joint_idx_v in\
+            zip(self.joint_names[1:], leg_indices_q, leg_indices_v):
+            q = observation["servo"][joint_name]["position"]
+            v = observation["servo"][joint_name]["velocity"]
+            tau = observation["servo"][joint_name]["torque"]
 
-                # Update the values
-                self._q[joint_id] = q
-                self._v[joint_id] = v
-                self._a[joint_id] = a
+            # Finite differences to compute the acceleration
+            a = v - self._v[joint_idx_v] if dt > 0 else 0.0
+            a = a / dt
 
-                # Update the measured torques
-                self.tau_measured[joint_id] = tau
+            # Update the values
+            self._q[joint_idx_q] = q
+            self._v[joint_idx_v] = v
+            self._a[joint_idx_v] = a
+
+            # Update the measured torques
+            self.tau_measured[joint_idx_v] = tau
 
         # Fill in the base joint values
         self._q[:3] = 0.0  # We don't observe the base position, and torques\
@@ -267,7 +277,7 @@ class InverseDynamics:
 
         # N.B.: Pinocchio and the IMU use different conventions for quaternions
         (w, x, y, z) = observation["imu"]["orientation"]
-        R_world_imu = pin.Quaternion((x, y, z, w))
+        R_world_imu = pin.Quaternion(np.array([x, y, z, w]))
         R_world_base = R_world_imu * self.R_imu_base
         self._q[3:7] = R_world_base.coeffs() # Quaternion representation
 
@@ -290,10 +300,10 @@ class InverseDynamics:
             self._q, self._v, self._a
         )
 
-        leg_indices = self.get_leg_indices("left", "tangent")
+        leg_indices_v = self.get_leg_indices("left", "tangent")
 
-        contact_error = tau_contact - self.tau_measured[leg_indices]
-        no_contact_error = tau_no_contact - self.tau_measured[leg_indices]
+        contact_error = tau_contact - self.tau_measured[leg_indices_v]
+        no_contact_error = tau_no_contact - self.tau_measured[leg_indices_v]
 
         self._log_dict = {
             "tau_no_contact": tau_no_contact,
