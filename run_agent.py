@@ -19,6 +19,7 @@ from upkie.utils.raspi import configure_agent_process, on_raspi
 from upkie.utils.spdlog import logging
 
 from pink_balancer import WholeBodyController
+from pink_balancer.waypoints import get_commands
 
 
 def get_vertical_force(
@@ -77,7 +78,7 @@ def run(
     spine: SpineInterface,
     spine_config: dict,
     controller: WholeBodyController,
-    frequency: float = 200.0,
+    frequency: float = 150.0,
     levitate: bool = False,
 ) -> None:
     """Read observations and send actions to the spine.
@@ -91,6 +92,8 @@ def run(
     """
     dt = 1.0 / frequency
     rate = RateLimiter(frequency, "controller")
+
+    waypoint_idx = 0
 
     if levitate:
         torso_force_in_world = [0.0, 0.0, 0.0]
@@ -113,6 +116,13 @@ def run(
 
         if step % 1000 and levitate:
             observation["joystick"] = {"cross_button": True} # trigger reset
+
+        if "joystick" not in observation or True:
+            cmd_dict, waypoint_idx = get_commands(observation, waypoint_idx)
+            observation["joystick"] = cmd_dict
+            print(waypoint_idx, cmd_dict)
+        else:
+            print(observation["joystick"])
 
         action = controller.cycle(observation, dt)
 
