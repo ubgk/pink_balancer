@@ -57,6 +57,11 @@ class InverseDynamics:
         # Initialize joint names
         self.joint_names = [name for name in self.model.names]
 
+        # IMU is mounted upside down, so we need to transform all\
+        # quantities to the correct frame.
+        self.R_imu_base = np.diag([1, -1, -1])  # y and z axes are inverted
+        self.R_imu_base = pin.Quaternion(self.R_imu_base)
+
         self._log_dict = {}
 
     @cached_property
@@ -260,15 +265,20 @@ class InverseDynamics:
         self._q[:3] = 0.0  # We don't observe the base position, and torques\
         # are not affected by it
 
-        # Both Pinocchio and the IMU use the same convention for quaternions
-        (x, y, z, w) = observation["imu"]["orientation"]  # quaternion
-        self._q[3:7] = [w, z, -y, -x] # IMU is mounted upside down. This is\
-        # equivalent to quaternion.to_matrix() * diag([1, -1, -1]).
+        # N.B.: Pinocchio and the IMU use different conventions for quaternions
+        (w, x, y, z) = observation["imu"]["orientation"]
+        R_world_imu = pin.Quaternion((x, y, z, w))
+        R_world_base = R_world_imu * self.R_imu_base
+        self._q[3:7] = R_world_base.coeffs() # Quaternion representation
 
         # Fill in the base velocity values
         self._v[:3] = 0.0  # We don't observe the base velocity
         # (we could integrate but it would drift)
-        self._v[3:6] = observation["imu"]["angular_velocity"]
+
+        # We convert the angular velocity from the IMU frame to the base frame
+        omega_imu = np.array(observation["imu"]["angular_velocity"])
+        omega_base = self.R_imu_base * omega_imu
+        self._v[3:6] = omega_base
 
         # Fill in the base acceleration values
         dd_x, dd_y, dd_z = observation["imu"]["linear_acceleration"]
