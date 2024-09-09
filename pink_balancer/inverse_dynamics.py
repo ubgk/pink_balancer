@@ -223,7 +223,8 @@ class InverseDynamics:
         )
 
         J_f = J[:3, self.base_indices_v + leg_indices_v]  # (3, 9)
-        J_fl = J_f[:3, leg_indices_v]  # (3, 3)
+        J_fl = J[:3, leg_indices_v]  # (3, 3)
+        J_fl_inv = np.linalg.pinv(J_fl)  # (3, 3)
 
         if not is_null(v):
             # Compute the contact Jacobian time variation
@@ -245,9 +246,6 @@ class InverseDynamics:
             a = cast(np.ndarray, a)
             joint_torques += J_f.dot(a[self.base_indices_v + leg_indices_v])
 
-        # Project the contact forces onto the joints
-        J_fl = J_f[:3, leg_indices_v]  # (3, 3)
-        J_fl_inv = np.linalg.pinv(J_fl)  # (3, 3)
 
         M_l = self.data.M[leg_indices_v, leg_indices_v]  # (3, 3)
 
