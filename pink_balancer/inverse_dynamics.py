@@ -9,6 +9,17 @@ from typing import Literal, Optional, cast
 import numpy as np
 import pinocchio as pin  # type: ignore
 import upkie_description  # type: ignore
+from upkie import model  # type: ignore
+
+upkie_model = model.Model(upkie_description.URDF_PATH)
+R_BASE_TO_IMU: np.ndarray = upkie_model.rotation_base_to_imu
+R_IMU_TO_BASE: np.ndarray = R_BASE_TO_IMU.T
+R_ARS_TO_WORLD: np.ndarray = upkie_model.rotation_ars_to_world
+
+# We also provide the above in quaternion form
+Q_BASE_TO_IMU: pin.Quaternion = pin.Quaternion(R_BASE_TO_IMU)
+Q_IMU_TO_BASE: pin.Quaternion = pin.Quaternion(R_IMU_TO_BASE)
+Q_ARS_TO_WORLD: pin.Quaternion = pin.Quaternion(R_ARS_TO_WORLD)
 
 
 def is_null(vec: Optional[np.ndarray]) -> bool:
@@ -57,11 +68,6 @@ class InverseDynamics:
         # Initialize joint names
         self.joint_names = [name for name in self.model.names
                             if name != 'universe']
-
-        # IMU is mounted upside down, so we need to transform all\
-        # quantities to the correct frame.
-        self.R_imu_base = np.diag([1, -1, -1])  # y and z axes are inverted
-        self.R_imu_base = pin.Quaternion(self.R_imu_base)
 
         self._log_dict = {}
 
@@ -279,9 +285,9 @@ class InverseDynamics:
 
         # N.B.: Pinocchio and the IMU use different conventions for quaternions
         (w, x, y, z) = observation["imu"]["orientation"]
-        R_world_imu = pin.Quaternion(np.array([x, y, z, w]))
-        R_world_base = R_world_imu * self.R_imu_base
-        self._q[3:7] = R_world_base.coeffs() # Quaternion representation
+        Q_imu_to_ars = pin.Quaternion(np.array([x, y, z, w]))
+        Q_imu_to_world = Q_ARS_TO_WORLD * Q_imu_to_ars
+        self._q[3:7] = Q_imu_to_world.coeffs() # Quaternion representation
 
         # Fill in the base velocity values
         self._v[:3] = 0.0  # We don't observe the base velocity
@@ -289,12 +295,12 @@ class InverseDynamics:
 
         # We convert the angular velocity from the IMU frame to the base frame
         omega_imu = np.array(observation["imu"]["angular_velocity"])
-        omega_base = self.R_imu_base * omega_imu
+        omega_base = R_IMU_TO_BASE @ omega_imu
         self._v[3:6] = omega_base
 
         # Fill in the base acceleration values
-        dd_x, dd_y, dd_z = observation["imu"]["linear_acceleration"]
-        self._a[:3] = [dd_x, -dd_y, -dd_z]  # IMU is mounted upside down
+        lin_accel_imu = np.array(observation["imu"]["linear_acceleration"])
+        self._a[:3] = R_IMU_TO_BASE @ lin_accel_imu
         self._a[3:6] = 0.0  # We don't observe the angular acceleration
 
         # Compute the inverse dynamics
