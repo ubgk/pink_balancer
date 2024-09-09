@@ -180,11 +180,11 @@ class InverseDynamics:
         tau_no_contact = tau_l_M + tau_l_nle + g[leg_indices_v]
 
         # Compute the contact forces and project them onto the joints
-        tau_contact = tau_no_contact + self.contact_on_joints(q, v, a)
+        tau_contact = tau_no_contact + self.contact_torques(q, v, a)
 
         return tau_no_contact, tau_contact
 
-    def contact_on_joints(
+    def contact_torques(
         self, q: np.ndarray, v: Optional[np.ndarray], a: Optional[np.ndarray]
     ) -> np.ndarray:
         r"""Compute the contact forces and project them onto the joints.
@@ -227,15 +227,16 @@ class InverseDynamics:
 
             Jdot_f = Jdot[:3, self.base_indices_v + leg_indices_v]  # (3, 6)
 
-        joint_forces = np.zeros(3)
+        # Joint torques due to contact forces
+        joint_torques = np.zeros(3)
 
         if not is_null(v):
             v = cast(np.ndarray, v)  # mypy hint: v is *always* np.ndarray here
-            joint_forces += Jdot_f.dot(v[self.base_indices_v + leg_indices_v])
+            joint_torques += Jdot_f.dot(v[self.base_indices_v + leg_indices_v])
 
         if not is_null(a):
             a = cast(np.ndarray, a)
-            joint_forces += J_f.dot(a[self.base_indices_v + leg_indices_v])
+            joint_torques += J_f.dot(a[self.base_indices_v + leg_indices_v])
 
         # Project the contact forces onto the joints
         J_fl = J_f[:3, leg_indices_v]  # (3, 3)
@@ -243,7 +244,7 @@ class InverseDynamics:
 
         M_l = self.data.M[leg_indices_v, leg_indices_v]  # (3, 3)
 
-        tau_contact = M_l @ J_fl_inv @ joint_forces
+        tau_contact = M_l @ J_fl_inv @ joint_torques
 
         return tau_contact
 
