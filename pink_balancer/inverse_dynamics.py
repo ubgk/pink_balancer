@@ -190,8 +190,9 @@ class InverseDynamics:
         r"""Compute the contact forces and project them onto the joints.
 
         This method computes $J^T_{fl} F_{fl}$, where $J_{fl}$ is the \
-        contact Jacobian and $F_{fl}$ is the contact force, as given in \
-        Eq. (5, 6) of the Hwangbo et al. paper.
+        contact Jacobian and $F_{fl}$ is the contact force, applied at the
+        foot (in our case, the leg anchor frame), as given in Eq. (5, 6)\
+        of the Hwangbo et al. paper.
 
         Only point contacts are considered, so the contact forces are \
         assumed to be linear forces (i.e., no torques).
@@ -202,7 +203,7 @@ class InverseDynamics:
             a: The joint accelerations (optional).
 
         Returns:
-            The contact forces on the joints.
+            The joint torques due to contact forces.
         """
         # Compute the contact Jacobians
         # Assume only linear forces, no torques (i.e., 3D point contact)
