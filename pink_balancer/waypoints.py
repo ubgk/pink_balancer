@@ -3,18 +3,17 @@ import pinocchio as pin
 
 # Waypoints to follow
 WAYPOINTS: list[pin.SE3] = [
-    pin.SE3(pin.Quaternion(1, 0, 0, 0), np.array([0.00, 0.00, 0.00])),
-    pin.SE3(pin.Quaternion(1, 0, 0, 0), np.array([1.00, 0.00, 0.00])),
-    pin.SE3(pin.Quaternion(1, 0, 0, 0), np.array([2.00, 0.00, 0.00])),
-    pin.SE3(pin.Quaternion(1, 0, 0, 0), np.array([2.50, 0.00, 0.00])),
+    pin.SE3(pin.Quaternion(1, 0, 0, 0), np.array([0.00, -0.1, 0.00])),
+    pin.SE3(pin.Quaternion(1, 0, 0, 0), np.array([0.80, -0.1, 0.00])),
+    pin.SE3(pin.Quaternion(1, 0, 0, 0), np.array([2.00, -0.1, 0.00])),
+    pin.SE3(pin.Quaternion(1, 0, 0, 0), np.array([2.40, -0.1, 0.00])),
     pin.SE3(pin.Quaternion(1, 0, 0, 0), np.array([2.50, 1.00, 0.00])),
-    pin.SE3(pin.Quaternion(1, 0, 0, 0), np.array([4.25, 1.00, 0.00])),
-    pin.SE3(pin.Quaternion(1, 0, 0, 0), np.array([4.25, -1.0, 0.00])),
-    pin.SE3(pin.Quaternion(1, 0, 0, 0), np.array([2.50, -1.0, 0.00])),
+    pin.SE3(pin.Quaternion(1, 0, 0, 0), np.array([4.10, 1.00, 0.00])),
+    pin.SE3(pin.Quaternion(1, 0, 0, 0), np.array([4.10, -1.0, 0.00])),
+    pin.SE3(pin.Quaternion(1, 0, 0, 0), np.array([2.40, -1.0, 0.00])),
     pin.SE3(pin.Quaternion(1, 0, 0, 0), np.array([1.25, -1.0, 0.00])),
     pin.SE3(pin.Quaternion(1, 0, 0, 0), np.array([0.50, -1.0, 0.00])),
-    pin.SE3(pin.Quaternion(1, 0, 0, 0), np.array([0.00, -1.0, 0.00])),
-    pin.SE3(pin.Quaternion(1, 0, 0, 0), np.array([0.00, -1.0, 0.00])),
+    pin.SE3(pin.Quaternion(1, 0, 0, 0), np.array([0.10, -1.0, 0.00])),
     pin.SE3(pin.Quaternion(1, 0, 0, 0), np.array([0.00, -0.5, 0.00])),
 
 
@@ -57,7 +56,7 @@ def get_commands(observation: dict, waypoint_idx: int) -> tuple:
 
     print(f"{r=}, {theta=}")
 
-    if np.abs(r) < 0.1:
+    if np.abs(r) < 0.12:
         print(f"Reached waypoint {waypoint_idx}")
         waypoint_idx = (waypoint_idx + 1) % len(WAYPOINTS)
 
