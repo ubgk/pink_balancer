@@ -159,6 +159,9 @@ class InverseDynamics:
         pin.forwardKinematics(self.model, self.data, q, v, a)
         pin.computeJointJacobians(self.model, self.data, q)
 
+        # Compute the mass matrix
+        pin.crba(self.model, self.data, q)
+
         # Compute gravity
         g = pin.computeGeneralizedGravity(self.model, self.data, q)
 
@@ -375,7 +378,7 @@ if __name__ == "__main__":
             log_dict = inverse_dynamics.log()
 
             observation["inverse_dynamics"] = log_dict
-            logger.log(obj)
+            logger.put(obj)
 
             # Write the log every 1000 cycles (i.e., every second at 1 kHz)
             if i % 1000 == 0:
