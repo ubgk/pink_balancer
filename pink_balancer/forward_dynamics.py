@@ -38,7 +38,7 @@ def is_null(vec: Optional[np.ndarray]) -> bool:
     return np.allclose(vec, 0)
 
 
-class InverseDynamics:
+class ForwardDynamics:
     """Compute the inverse dynamics of the robot."""
 
     def __init__(self):
@@ -60,10 +60,10 @@ class InverseDynamics:
         # Initialize the state vectors
         self._q = np.zeros(self.model.nq)
         self._v = np.zeros(self.model.nv)
-        self._a = np.zeros(self.model.nv)
+        self._a_measured = np.zeros(self.model.nv)
 
         # Initialize the measured torques
-        self.tau_measured = np.zeros(self.model.nv)
+        self.tau = np.zeros(self.model.nv)
 
         # Initialize joint names
         self.joint_names = [
@@ -130,30 +130,31 @@ class InverseDynamics:
 
         return joint_indices
 
-    def compute_torques(
-        self, q: np.ndarray, v: Optional[np.ndarray], a: Optional[np.ndarray]
+    def compute_accelerations(
+        self, q: np.ndarray, v: np.ndarray, tau: np.ndarray, a: np.ndarray
     ) -> tuple[np.ndarray, np.ndarray]:
         """Compute the inverse dynamics of the robot.
 
         Args:
             q: The joint configuration.
             v: The joint velocity.
-            a: The joint acceleration.
+            tau: The joint torques.
+            a: The joint accelerations.
 
         Returns:
-            The estimated joint torques, both with and without contact forces.
+            The estimated leg accelerations, both with and without contact forces.
         """
         assert q.shape == (
             self.model.nq,
         ), "Invalid joint configuration shape."
 
-        if v is not None:
-            assert v.shape == (self.model.nv,), "Invalid joint velocity shape."
+        assert v.shape == (self.model.nv,), "Invalid joint velocity shape."
 
-        if a is not None:
-            assert a.shape == (
-                self.model.nv,
-            ), "Invalid joint acceleration shape."
+        assert tau.shape == (
+            self.model.nv,
+        ), "Invalid joint acceleration shape."
+
+        assert a.shape == (self.model.nv,), "Invalid joint acceleration shape."
 
         # Update the robot state
         pin.forwardKinematics(self.model, self.data, q, v, a)
@@ -162,35 +163,37 @@ class InverseDynamics:
         # Compute gravity
         g = pin.computeGeneralizedGravity(self.model, self.data, q)
 
-        if is_null(a):
-            tau_l_M = np.zeros(3)
-        else:
-            # mypy hint: a is *always* np.ndarray if we get here
-            a = cast(np.ndarray, a)
+        # Get the reduced mass matrix M_l_lb (i.e., the mass matrix
+        # of the robot that maps the base and the chosen leg onto
+        # the chosen leg)
+        leg_indices_v = self.get_leg_indices("left", "tangent")
 
-            # Get the reduced mass matrix M_l_lb (i.e., the mass matrix
-            # of the robot that maps the base and the chosen leg onto
-            # the chosen leg)
-            leg_indices_v = self.get_leg_indices("left", "tangent")
+        # M_l_lb s.t. M_l_lb * [a_b; a_l] = M_l * a_l + M_lb * a_b
+        M_lb = self.data.M[leg_indices_v, :][:, self.base_indices_v]
+        M_l = self.data.M[leg_indices_v, :][:, leg_indices_v]
+        # print(f"self.data.M: {self.data.M}")
 
-            # M_l_lb s.t. M_l_lb * [a_b; a_l] = M_l * a_l + M_lb * a_b
-            M_l_lb = self.data.M[leg_indices_v, :][
-                :, self.base_indices_v + leg_indices_v
-            ]
+        # pseudo-inverse of M_l
+        M_l_inv = np.linalg.pinv(M_l)
 
-            # Forces on the leg due to joint accelerations
-            tau_l_M = M_l_lb @ a[self.base_indices_v + leg_indices_v]
+        # Forces on the leg due to base accelerations
+        tau_l_M = M_lb @ a[self.base_indices_v]
 
         # Compute the non-linear effects (gravity, Coriolis, centrifugal)
         tau_l_nle = self.data.nle[leg_indices_v]
 
         # Compute the joint torques
-        tau_no_contact = tau_l_M + tau_l_nle + g[leg_indices_v]
+        a_no_contact = M_l_inv @ (
+            tau[leg_indices_v] - tau_l_M - tau_l_nle - g[leg_indices_v]
+        )
 
         # Compute the contact forces and project them onto the joints
-        tau_contact = tau_no_contact + self.contact_torques(q, v, a)
+        a_contact = -M_l_inv @ self.contact_torques(q, v, a)
+        a_contact = a_no_contact + a_contact
 
-        return tau_no_contact, tau_contact
+        # print(f"{a_no_contact=}")
+        # print(f"{a_contact=}")
+        return a_no_contact, a_contact
 
     def contact_torques(
         self, q: np.ndarray, v: Optional[np.ndarray], a: Optional[np.ndarray]
@@ -248,9 +251,15 @@ class InverseDynamics:
             a = cast(np.ndarray, a)
             joint_torques += J_f.dot(a[self.base_indices_v + leg_indices_v])
 
-        M_l = self.data.M[leg_indices_v, leg_indices_v]  # (3, 3)
+        M_l = self.data.M[leg_indices_v, :][:, leg_indices_v]  # (3, 3)
 
         tau_contact = M_l @ J_fl_inv @ joint_torques
+
+        if False:
+            print(f"Contact torques: {tau_contact}")
+            print(f" v: {v[self.base_indices_v + leg_indices_v]}")
+            print(f" a: {a[self.base_indices_v + leg_indices_v]}")
+            print()
 
         return tau_contact
 
@@ -268,16 +277,16 @@ class InverseDynamics:
             tau = observation["servo"][joint_name]["torque"]
 
             # Finite differences to compute the acceleration
-            a = v - self._v[joint_idx_v] if dt > 0 else 0.0
-            a = a / dt
+            a = v - self._v[joint_idx_v]
+            a = a / dt if dt > 0 else 0.0
 
             # Update the values
             self._q[joint_idx_q] = q
             self._v[joint_idx_v] = v
-            self._a[joint_idx_v] = a
+            self._a_measured[joint_idx_v] = a
 
             # Update the measured torques
-            self.tau_measured[joint_idx_v] = tau
+            self.tau[joint_idx_v] = tau
 
         # Fill in the base joint values
         self._q[:3] = 0.0  # We don't observe the base position, and torques\
@@ -300,24 +309,24 @@ class InverseDynamics:
 
         # Fill in the base acceleration values
         lin_accel_imu = np.array(observation["imu"]["linear_acceleration"])
-        self._a[:3] = R_IMU_TO_BASE @ lin_accel_imu
-        self._a[3:6] = 0.0  # We don't observe the angular acceleration
+        self._a_measured[:3] = R_IMU_TO_BASE @ lin_accel_imu
+        self._a_measured[3:6] = 0.0  # We don't observe the angular acc.
 
         # Compute the inverse dynamics
-        tau_no_contact, tau_contact = self.compute_torques(
-            self._q, self._v, self._a
+        a_no_contact, a_contact = self.compute_accelerations(
+            self._q, self._v, self.tau, self._a_measured
         )
 
         leg_indices_v = self.get_leg_indices("left", "tangent")
 
-        contact_error = tau_contact - self.tau_measured[leg_indices_v]
-        no_contact_error = tau_no_contact - self.tau_measured[leg_indices_v]
+        contact_error = a_contact - self._a_measured[leg_indices_v]
+        no_contact_error = a_no_contact - self._a_measured[leg_indices_v]
 
         self._log_dict = {
-            "tau_no_contact": tau_no_contact,
-            "tau_contact": tau_contact,
-            "contact_error": contact_error,
-            "no_contact_error": no_contact_error,
+            "a_no_contact": a_no_contact.copy(),
+            "a_contact": a_contact.copy(),
+            "contact_error": contact_error.copy(),
+            "no_contact_error": no_contact_error.copy(),
         }
 
         return self._log_dict
@@ -340,11 +349,10 @@ if __name__ == "__main__":
         "input_path",
         type=str,
         help="The input file containing the observations.",
-        required=True,
     )
 
     parser.add_argument(
-        "output_path",
+        "--output_path",
         type=str,
         help="The output file to save the computed torques.",
         default=None,
@@ -365,17 +373,17 @@ if __name__ == "__main__":
 
     with open(args.input_path, "rb") as input_file:
         unpacker = msgpack.Unpacker(input_file, raw=False)
-        logger = mpacklog.Logger(args.output_path)
+        logger = mpacklog.SyncLogger(args.output_path)
 
-        inverse_dynamics = InverseDynamics()
+        forward_dynamics = ForwardDynamics()
 
         for i, obj in tqdm(enumerate(unpacker)):
             observation = obj["observation"]
-            inverse_dynamics.cycle(observation, dt=0.001)
-            log_dict = inverse_dynamics.log()
+            forward_dynamics.cycle(observation, dt=0.001)
+            log_dict = forward_dynamics.log()
 
-            observation["inverse_dynamics"] = log_dict
-            logger.log(obj)
+            observation["forward_dynamics"] = log_dict
+            logger.put(obj)
 
             # Write the log every 1000 cycles (i.e., every second at 1 kHz)
             if i % 1000 == 0:
