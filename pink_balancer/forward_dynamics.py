@@ -160,6 +160,9 @@ class ForwardDynamics:
         pin.forwardKinematics(self.model, self.data, q, v, a)
         pin.computeJointJacobians(self.model, self.data, q)
 
+        # Compute the mass matrix
+        pin.crba(self.model, self.data, q)
+
         # Compute gravity
         g = pin.computeGeneralizedGravity(self.model, self.data, q)
 
