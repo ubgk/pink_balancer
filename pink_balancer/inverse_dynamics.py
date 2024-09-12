@@ -66,8 +66,9 @@ class InverseDynamics:
         self.tau_measured = np.zeros(self.model.nv)
 
         # Initialize joint names
-        self.joint_names = [name for name in self.model.names
-                            if name != 'universe']
+        self.joint_names = [
+            name for name in self.model.names if name != "universe"
+        ]
 
         self._log_dict = {}
 
@@ -113,8 +114,9 @@ class InverseDynamics:
         joint_indices = []
 
         for joint_name in self.joint_names:
-            if leg in joint_name or\
-                  (leg == "both" and joint_name != "root_joint"):
+            if leg in joint_name or (
+                leg == "both" and joint_name != "root_joint"
+            ):
                 joint_id = self.model.getJointId(joint_name)
                 joint = self.model.joints[joint_id]
 
@@ -235,7 +237,7 @@ class InverseDynamics:
 
             Jdot_f = Jdot[:3, self.base_indices_v + leg_indices_v]  # (3, 6)
 
-        # Joint torques due to contact forces
+        # Joint torques due to contact forces
         joint_torques = np.zeros(3)
 
         if not is_null(v):
@@ -245,7 +247,6 @@ class InverseDynamics:
         if not is_null(a):
             a = cast(np.ndarray, a)
             joint_torques += J_f.dot(a[self.base_indices_v + leg_indices_v])
-
 
         M_l = self.data.M[leg_indices_v, leg_indices_v]  # (3, 3)
 
@@ -259,8 +260,9 @@ class InverseDynamics:
 
         leg_indices_q = self.get_leg_indices("both", "config")
         leg_indices_v = self.get_leg_indices("both", "tangent")
-        for joint_name, joint_idx_q, joint_idx_v in\
-            zip(self.joint_names[1:], leg_indices_q, leg_indices_v):
+        for joint_name, joint_idx_q, joint_idx_v in zip(
+            self.joint_names[1:], leg_indices_q, leg_indices_v
+        ):
             q = observation["servo"][joint_name]["position"]
             v = observation["servo"][joint_name]["velocity"]
             tau = observation["servo"][joint_name]["torque"]
@@ -285,7 +287,7 @@ class InverseDynamics:
         (w, x, y, z) = observation["imu"]["orientation"]
         Q_imu_to_ars = pin.Quaternion(np.array([x, y, z, w]))
         Q_imu_to_world = Q_ARS_TO_WORLD * Q_imu_to_ars
-        self._q[3:7] = Q_imu_to_world.coeffs() # Quaternion representation
+        self._q[3:7] = Q_imu_to_world.coeffs()  # Quaternion representation
 
         # Fill in the base velocity values
         self._v[:3] = 0.0  # We don't observe the base velocity
@@ -299,7 +301,7 @@ class InverseDynamics:
         # Fill in the base acceleration values
         lin_accel_imu = np.array(observation["imu"]["linear_acceleration"])
         self._a[:3] = R_IMU_TO_BASE @ lin_accel_imu
-        self._a[3:6] = 0.0  # We don't observe the angular acceleration
+        self._a[3:6] = 0.0  # We don't observe the angular acceleration
 
         # Compute the inverse dynamics
         tau_no_contact, tau_contact = self.compute_torques(
@@ -323,3 +325,61 @@ class InverseDynamics:
     def log(self) -> dict:
         """Return the log dictionary."""
         return self._log_dict
+
+
+if __name__ == "__main__":
+    import argparse
+
+    import mpacklog  # type: ignore
+    import msgpack  # type: ignore
+    from tqdm import tqdm  # type: ignore
+
+    parser = argparse.ArgumentParser(description="Inverse dynamics model.")
+
+    parser.add_argument(
+        "input_path",
+        type=str,
+        help="The input file containing the observations.",
+        required=True,
+    )
+
+    parser.add_argument(
+        "output_path",
+        type=str,
+        help="The output file to save the computed torques.",
+        default=None,
+        required=False,
+    )
+
+    args = parser.parse_args()
+
+    assert args.input_path.endswith(".mpack"), "Invalid input file format."
+
+    if args.output_path is not None:
+        assert args.output_path.endswith(
+            ".mpack"
+        ), "Invalid output file format."
+    else:
+        args.output_path = args.input_path.replace(".mpack", "_torques.mpack")
+        print(f"Output file: {args.output_path}")
+
+    with open(args.input_path, "rb") as input_file:
+        unpacker = msgpack.Unpacker(input_file, raw=False)
+        logger = mpacklog.Logger(args.output_path)
+
+        inverse_dynamics = InverseDynamics()
+
+        for i, obj in tqdm(enumerate(unpacker)):
+            observation = obj["observation"]
+            inverse_dynamics.cycle(observation, dt=0.001)
+            log_dict = inverse_dynamics.log()
+
+            observation["inverse_dynamics"] = log_dict
+            logger.log(obj)
+
+            # Write the log every 1000 cycles (i.e., every second at 1 kHz)
+            if i % 1000 == 0:
+                logger.write()
+
+        input_file.close()
+        logger.write()  # Write the last logs
