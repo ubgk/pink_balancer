@@ -7,7 +7,7 @@ PIBalancerGains.pitch_stiffness = 20.0
 PIBalancerGains.position_damping = 5.0
 PIBalancerGains.position_stiffness = 2.0
 
-HeightController.max_crouch_height = 0.08            # [m]
+HeightController.max_crouch_height = 0.03            # [m]
 HeightController.max_crouch_velocity = 0.05          # [m] / [s]
 HeightController.max_height_difference = 0.02        # [m]
 HeightController.max_lean_velocity = 0.04            # [m] / [s]
