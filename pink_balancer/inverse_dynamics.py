@@ -251,7 +251,7 @@ class InverseDynamics:
             a = cast(np.ndarray, a)
             joint_torques += J_f.dot(a[self.base_indices_v + leg_indices_v])
 
-        M_l = self.data.M[leg_indices_v, leg_indices_v]  # (3, 3)
+        M_l = self.data.M[leg_indices_v, :][:, leg_indices_v]  # (3, 3)
 
         tau_contact = M_l @ J_fl_inv @ joint_torques
 
@@ -343,11 +343,10 @@ if __name__ == "__main__":
         "input_path",
         type=str,
         help="The input file containing the observations.",
-        required=True,
     )
 
     parser.add_argument(
-        "output_path",
+        "--output_path",
         type=str,
         help="The output file to save the computed torques.",
         default=None,
@@ -368,7 +367,7 @@ if __name__ == "__main__":
 
     with open(args.input_path, "rb") as input_file:
         unpacker = msgpack.Unpacker(input_file, raw=False)
-        logger = mpacklog.Logger(args.output_path)
+        logger = mpacklog.SyncLogger(args.output_path)
 
         inverse_dynamics = InverseDynamics()
 
