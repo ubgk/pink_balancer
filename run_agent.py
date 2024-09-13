@@ -17,11 +17,12 @@ import yaml
 from loop_rate_limiters import RateLimiter
 from scipy.spatial.transform import Rotation
 
-from pink_balancer import WholeBodyController
 from upkie.exceptions import FallDetected
 from upkie.spine import SpineInterface
 from upkie.utils.raspi import configure_agent_process, on_raspi
 from upkie.utils.spdlog import logging
+
+from pink_balancer import WholeBodyController
 
 
 def get_vertical_force(
@@ -31,6 +32,7 @@ def get_vertical_force(
     delta: float = 0.1,
     hold_steps: int = 400,
 ) -> float:
+    """Get the vertical force to apply to the robot."""
     lift: float = 0.0  # 0 = no force, 1 => apply -mg
     if step < start:
         lift = 0.0
@@ -96,6 +98,7 @@ def run(
         spine_config: Spine configuration dictionary.
         controller: Whole-body controller.
         frequency: Control frequency in Hz.
+        levitate: Levitate the robot by applying a vertical force.
     """
     dt = 1.0 / frequency
     rate = RateLimiter(frequency, "controller")
@@ -144,7 +147,7 @@ def run(
         if levitate:
             torso_force_in_world[2] = get_vertical_force(step % 1000)
             action["bullet"] = bullet_action
-        
+
         spine.set_action(action)
         step += 1
         rate.sleep()
