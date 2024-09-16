@@ -25,9 +25,7 @@ class WholeBodyController:
     gain_scale: float
     turning_gain_scale: float
 
-    def __init__(
-        self, gain_scale: float, turning_gain_scale: float, visualize: bool
-    ):
+    def __init__(self, gain_scale: float, turning_gain_scale: float, visualize: bool):
         """Create controller.
 
         Args:
