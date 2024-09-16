@@ -13,10 +13,8 @@ from pathlib import Path
 
 import gin
 import yaml
-
 from loop_rate_limiters import RateLimiter
 from scipy.spatial.transform import Rotation
-
 from upkie.exceptions import FallDetected
 from upkie.spine import SpineInterface
 from upkie.utils.raspi import configure_agent_process, on_raspi
@@ -121,26 +119,27 @@ def run(
 
     observation["joystick"] = {""}
 
-    
     while True:
         observation = spine.get_observation()
 
-        if forward: 
-            controller.height_controller.target_height = 0.05 # max_crouch_height: 0.08
-            controller.wheel_controller.target_ground_velocity = 0.3
+        if forward:
+            controller.height_controller.target_height = 0.03  # max_crouch_height: 0.03
+            controller.wheel_controller.target_ground_velocity = 0.4 # was 0.3
 
             # Simple P-controller to make sure we are always
             # facing the stairs (which corresponds to a 0-yaw value)
             current_orientation = observation["imu"]["orientation"]
-            current_yaw = Rotation.from_quat(current_orientation).as_euler("xyz")[0] * 180 / pi
+            current_yaw = (
+                Rotation.from_quat(current_orientation).as_euler("xyz")[0] * 180 / pi
+            )
             print(f"current_yaw: {current_yaw.round(1)}")
             target_yaw = 0.0
-            controller.wheel_controller.target_yaw_velocity = - 0.1 * (
+            controller.wheel_controller.target_yaw_velocity = -0.1 * (
                 target_yaw - current_yaw
             )
 
         if step % 1000 and levitate:
-            observation["joystick"] = {"cross_button": True} # trigger reset
+            observation["joystick"] = {"cross_button": True}  # trigger reset
 
         action = controller.cycle(observation, dt)
 
@@ -184,7 +183,13 @@ if __name__ == "__main__":
     while keep_trying:
         keep_trying = False
         try:
-            run(spine, spine_config, controller, levitate=args.levitate, forward=args.forward)
+            run(
+                spine,
+                spine_config,
+                controller,
+                levitate=args.levitate,
+                forward=args.forward,
+            )
         except KeyboardInterrupt:
             logging.info("Caught a keyboard interrupt")
         except FallDetected:
