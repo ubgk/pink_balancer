@@ -132,7 +132,7 @@ class InverseDynamics:
 
     def compute_torques(
         self, q: np.ndarray, v: Optional[np.ndarray], a: Optional[np.ndarray]
-    ) -> tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Compute the inverse dynamics of the robot.
 
         Args:
@@ -159,11 +159,13 @@ class InverseDynamics:
         pin.forwardKinematics(self.model, self.data, q, v, a)
         pin.computeJointJacobians(self.model, self.data, q)
 
-        # Compute the mass matrix
+        # Compute the mass matrix
         pin.crba(self.model, self.data, q)
 
         # Compute gravity
         g = pin.computeGeneralizedGravity(self.model, self.data, q)
+
+        leg_indices_v = self.get_leg_indices("left", "tangent")
 
         if is_null(a):
             tau_l_M = np.zeros(3)
@@ -174,8 +176,6 @@ class InverseDynamics:
             # Get the reduced mass matrix M_l_lb (i.e., the mass matrix
             # of the robot that maps the base and the chosen leg onto
             # the chosen leg)
-            leg_indices_v = self.get_leg_indices("left", "tangent")
-
             # M_l_lb s.t. M_l_lb * [a_b; a_l] = M_l * a_l + M_lb * a_b
             M_l_lb = self.data.M[leg_indices_v, :][
                 :, self.base_indices_v + leg_indices_v
@@ -193,7 +193,7 @@ class InverseDynamics:
         # Compute the contact forces and project them onto the joints
         tau_contact = tau_no_contact + self.contact_torques(q, v, a)
 
-        return tau_no_contact, tau_contact
+        return tau_no_contact, tau_contact, g[leg_indices_v], tau_l_nle
 
     def contact_torques(
         self, q: np.ndarray, v: Optional[np.ndarray], a: Optional[np.ndarray]
@@ -307,7 +307,7 @@ class InverseDynamics:
         self._a[3:6] = 0.0  # We don't observe the angular acceleration
 
         # Compute the inverse dynamics
-        tau_no_contact, tau_contact = self.compute_torques(
+        tau_no_contact, tau_contact, gravity, nle = self.compute_torques(
             self._q, self._v, self._a
         )
 
@@ -321,6 +321,8 @@ class InverseDynamics:
             "tau_contact": tau_contact,
             "contact_error": contact_error,
             "no_contact_error": no_contact_error,
+            "gravity": gravity,
+            "nle": nle,
         }
 
         return self._log_dict
@@ -362,7 +364,9 @@ if __name__ == "__main__":
             ".mpack"
         ), "Invalid output file format."
     else:
-        args.output_path = args.input_path.replace(".mpack", "_torques.mpack")
+        args.output_path = args.input_path.replace(
+            ".mpack", "_inverse_dynamics.mpack"
+        )
         print(f"Output file: {args.output_path}")
 
     with open(args.input_path, "rb") as input_file:
