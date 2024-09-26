@@ -6,7 +6,7 @@ bullet:
         position_base_in_world: [0.0, 0.0, 2.6] # [m]
     torque_control:
         kp: 20.0
-        kd: 1.0
+        kd: 0.5
     monitor:
         contacts:
             left_wheel_tire: true
