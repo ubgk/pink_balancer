@@ -110,6 +110,7 @@ class HeightController:
         max_height_difference: float,
         max_lean_velocity: float,
         visualize: bool,
+        target_height: float = 0.0
     ):
         """Create controller.
 
@@ -122,6 +123,7 @@ class HeightController:
             max_lean_velocity: Maximum leaning (to the side) velocity, in [m] /
                 [s].
             visualize: If true, open a MeshCat visualizer on the side.
+            target_height: Initial target height, in [m].
         """
         robot = upkie_description.load_in_pinocchio(root_joint=None)
         configuration = pink.Configuration(robot.model, robot.data, robot.q0)
@@ -189,6 +191,7 @@ class HeightController:
         self.max_crouch_velocity = max_crouch_velocity
         self.max_height_difference = max_height_difference
         self.max_lean_velocity = max_lean_velocity
+        self.target_height = target_height
         self.robot = robot
         self.servo_layout = servo_layout
         self.target_position_wheel_in_rest = {

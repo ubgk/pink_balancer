@@ -12,6 +12,7 @@ HeightController.max_crouch_velocity = 0.05          # [m] / [s]
 HeightController.max_height_difference = 0.02        # [m]
 HeightController.max_lean_velocity = 0.04            # [m] / [s]
 HeightController.visualize = False
+HeightController.target_height = 0.01                # [m]
 
 MPCBalancer.leg_length = 0.58                        # [m]
 MPCBalancer.nb_timesteps = 50
