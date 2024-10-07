@@ -270,6 +270,8 @@ class InverseDynamics:
             v = observation["servo"][joint_name]["velocity"]
             tau = observation["servo"][joint_name]["torque"]
 
+            # v = 0.9 * self._v[joint_idx_v] + 0.1 * v
+
             # Finite differences to compute the acceleration
             a = v - self._v[joint_idx_v] if dt > 0 else 0.0
             a = a / dt
@@ -313,8 +315,10 @@ class InverseDynamics:
 
         leg_indices_v = self.get_leg_indices("left", "tangent")
 
-        contact_error = tau_contact - self.tau_measured[leg_indices_v]
-        no_contact_error = tau_no_contact - self.tau_measured[leg_indices_v]
+        contact_error = np.abs(tau_contact - self.tau_measured[leg_indices_v])
+        no_contact_error = np.abs(
+            tau_no_contact - self.tau_measured[leg_indices_v]
+        )
 
         self._log_dict = {
             "tau_no_contact": tau_no_contact,
