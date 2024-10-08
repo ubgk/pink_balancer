@@ -345,7 +345,8 @@ if __name__ == "__main__":
     import msgpack  # type: ignore
     from tqdm import tqdm  # type: ignore
 
-    parser = argparse.ArgumentParser(description="Inverse dynamics model.")
+    parser = argparse.ArgumentParser(description="Full-body inverse dynamics "
+                                     "using Pinocchio.")
 
     parser.add_argument(
         "input_path",
@@ -371,7 +372,7 @@ if __name__ == "__main__":
         ), "Invalid output file format."
     else:
         args.output_path = args.input_path.replace(
-            ".mpack", "_inverse_dynamics.mpack"
+            ".mpack", "_whole_dynamics.mpack"
         )
         print(f"Output file: {args.output_path}")
 
@@ -386,7 +387,7 @@ if __name__ == "__main__":
             inverse_dynamics.cycle(observation, dt=0.001)
             log_dict = inverse_dynamics.log()
 
-            observation["inverse_dynamics"] = log_dict
+            observation["whole_dynamics"] = log_dict
             logger.put(obj)
 
             # Write the log every 1000 cycles (i.e., every second at 1 kHz)
