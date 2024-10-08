@@ -9,6 +9,7 @@ import gin
 from upkie.utils.clamp import clamp
 
 from .height_controller import HeightController
+from .inverse_dynamics import InverseDynamics
 from .wheel_controller import WheelController
 
 
@@ -41,6 +42,7 @@ class WholeBodyController:
         self.height_controller = HeightController(visualize=visualize)
         self.turning_gain_scale = turning_gain_scale
         self.wheel_controller = WheelController()
+        self.inverse_dynamics = InverseDynamics()
 
     def cycle(self, observation: dict, dt: float) -> dict:
         """Compute action for a new cycle.
@@ -69,9 +71,12 @@ class WholeBodyController:
             servo_action[joint_name]["kp_scale"] = kp_scale
             servo_action[joint_name]["kd_scale"] = kd_scale
 
+        self.inverse_dynamics.cycle(observation, dt)
+
         action = {
             "servo": servo_action,
             "height_controller": self.height_controller.log(),
             "wheel_controller": self.wheel_controller.log(),
+            "inverse_dynamics": self.inverse_dynamics.log(),
         }
         return action
