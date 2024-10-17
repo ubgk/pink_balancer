@@ -44,7 +44,7 @@ class InverseDynamics:
     def __init__(self):
         """Initialize the robot model."""
         self.robot = upkie_description.load_in_pinocchio(
-            root_joint=pin.JointModelFreeFlyer()
+            root_joint=None
         )
 
         self.model = self.robot.model
@@ -164,14 +164,13 @@ class InverseDynamics:
         # Compute the joint torques
         if True:
             tau_no_contact = pin.rnea(self.model, self.data, q, v, a)
-            print(tau_no_contact[:6])
-            raise ValueError
+            # print(tau_no_contact[:6])
             tau_no_contact = tau_no_contact[leg_indices_v]
         else:
             tau_no_contact = self.data.tau[leg_indices_v]
 
         # Compute the contact forces and project them onto the joints
-        tau_contact = tau_no_contact + self.contact_torques(q, v, a)
+        tau_contact = tau_no_contact # + self.contact_torques(q, v, a)
 
         return (
             tau_no_contact,
@@ -251,13 +250,13 @@ class InverseDynamics:
         print(self.joint_names)
 
         for joint_name, joint_idx_q, joint_idx_v in zip(
-            self.joint_names[1:], leg_indices_q, leg_indices_v
+            self.joint_names, leg_indices_q, leg_indices_v
         ):
             q = observation["servo"][joint_name]["position"]
             v = observation["servo"][joint_name]["velocity"]
             tau = observation["servo"][joint_name]["torque"]
 
-            v = 0.75 * self._v[joint_idx_v] + 0.25 * v
+            # v = 0.75 * self._v[joint_idx_v] + 0.25 * v
 
             # Finite differences to compute the acceleration
             a = v - self._v[joint_idx_v] if dt > 0 else 0.0
@@ -272,31 +271,32 @@ class InverseDynamics:
             # Update the measured torques
             self.tau_measured[joint_idx_v] = tau
 
-        # Fill in the base joint values
-        self._q[:3] = 0.0  # We don't observe the base position, and torques\
-        # are not affected by it
+        if False:
+            # Fill in the base joint values
+            self._q[:3] = 0.0  # We don't observe the base position, and torques\
+            # are not affected by it
 
-        # N.B.: Pinocchio and the IMU use different conventions for quaternions
-        (w, x, y, z) = observation["imu"]["orientation"]
-        Q_imu_to_ars = pin.Quaternion(np.array([x, y, z, w]))
-        Q_imu_to_world = Q_ARS_TO_WORLD * Q_imu_to_ars
-        self._q[3:7] = Q_imu_to_world.coeffs()  # Quaternion representation
+            # N.B.: Pinocchio and the IMU use different conventions for quaternions
+            (w, x, y, z) = observation["imu"]["orientation"]
+            Q_imu_to_ars = pin.Quaternion(np.array([x, y, z, w]))
+            Q_imu_to_world = Q_ARS_TO_WORLD * Q_imu_to_ars
+            self._q[3:7] = Q_imu_to_world.coeffs()  # Quaternion representation
 
-        # Fill in the base velocity values
-        self._v[:3] = 0.0  # We don't observe the base velocity
-        # (we could integrate but it would drift)
+            # Fill in the base velocity values
+            self._v[:3] = 0.0  # We don't observe the base velocity
+            # (we could integrate but it would drift)
 
-        # We convert the angular velocity from the IMU frame to the base frame
-        omega_imu = np.array(observation["imu"]["angular_velocity"])
-        omega_base = R_IMU_TO_BASE @ omega_imu
-        self._v[3:6] = omega_base
+            # We convert the angular velocity from the IMU frame to the base frame
+            omega_imu = np.array(observation["imu"]["angular_velocity"])
+            omega_base = R_IMU_TO_BASE @ omega_imu
+            self._v[3:6] = omega_base
 
-        # Fill in the base acceleration values
-        lin_accel_imu = np.array(observation["imu"]["linear_acceleration"])
-        # self._a[0:6] = 0.0  # We don't observe the angular acceleration
-        # self._a[2] = - 9.81  # Gravity in the z direction
+            # Fill in the base acceleration values
+            lin_accel_imu = np.array(observation["imu"]["linear_acceleration"])
+            # self._a[0:6] = 0.0  # We don't observe the angular acceleration
+            # self._a[2] = - 9.81  # Gravity in the z direction
 
-        self._a[:3] = R_IMU_TO_BASE @ lin_accel_imu
+            self._a[:3] = R_IMU_TO_BASE @ lin_accel_imu
 
         # Compute the inverse dynamics
         tau_no_contact, tau_contact = self.compute_torques(
