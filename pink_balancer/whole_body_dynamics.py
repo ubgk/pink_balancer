@@ -68,7 +68,8 @@ class InverseDynamics:
         # Initialize joint names
         self.joint_names = [
             name for name in self.model.names if name != "universe"
-        ]
+        ]  # ['root_joint', 'left_hip', 'left_knee', 'left_wheel', 'right_hip',
+        # 'right_knee', 'right_wheel']
 
         self._log_dict = {}
 
@@ -156,26 +157,26 @@ class InverseDynamics:
             ), "Invalid joint acceleration shape."
 
         # Update the robot state
-        pin.forwardKinematics(self.model, self.data, q, v, a)
-        pin.computeJointJacobians(self.model, self.data, q)
-
-        # Compute the mass matrix
-        pin.crba(self.model, self.data, q)
-
-        # Compute gravity
-        g = pin.computeGeneralizedGravity(self.model, self.data, q)
+        pin.computeAllTerms(self.model, self.data, q, v)
 
         leg_indices_v = self.get_leg_indices("left", "tangent")
 
         # Compute the joint torques
-        tau_no_contact = (pin.rnea(self.model, self.data, q, v, a))[
-            leg_indices_v
-        ]
+        if True:
+            tau_no_contact = pin.rnea(self.model, self.data, q, v, a)
+            print(tau_no_contact[:6])
+            raise ValueError
+            tau_no_contact = tau_no_contact[leg_indices_v]
+        else:
+            tau_no_contact = self.data.tau[leg_indices_v]
 
         # Compute the contact forces and project them onto the joints
         tau_contact = tau_no_contact + self.contact_torques(q, v, a)
 
-        return tau_no_contact, tau_contact, g[leg_indices_v]
+        return (
+            tau_no_contact,
+            tau_contact,
+        )  # g[leg_indices_v]
 
     def contact_torques(
         self, q: np.ndarray, v: Optional[np.ndarray], a: Optional[np.ndarray]
@@ -245,6 +246,10 @@ class InverseDynamics:
 
         leg_indices_q = self.get_leg_indices("both", "config")
         leg_indices_v = self.get_leg_indices("both", "tangent")
+
+        print(leg_indices_q, leg_indices_v)
+        print(self.joint_names)
+
         for joint_name, joint_idx_q, joint_idx_v in zip(
             self.joint_names[1:], leg_indices_q, leg_indices_v
         ):
@@ -252,12 +257,12 @@ class InverseDynamics:
             v = observation["servo"][joint_name]["velocity"]
             tau = observation["servo"][joint_name]["torque"]
 
-            v = 0.95 * self._v[joint_idx_v] + 0.05 * v
+            v = 0.75 * self._v[joint_idx_v] + 0.25 * v
 
             # Finite differences to compute the acceleration
             a = v - self._v[joint_idx_v] if dt > 0 else 0.0
             a = a / dt
-            # a = 0
+            # a = 0
 
             # Update the values
             self._q[joint_idx_q] = q
@@ -288,15 +293,13 @@ class InverseDynamics:
 
         # Fill in the base acceleration values
         lin_accel_imu = np.array(observation["imu"]["linear_acceleration"])
-        # self._a[0:6] = 0.0  # We don't observe the angular acceleration
-        # self._a[2] = - 9.81  # Gravity in the z direction
+        # self._a[0:6] = 0.0  # We don't observe the angular acceleration
+        # self._a[2] = - 9.81  # Gravity in the z direction
 
         self._a[:3] = R_IMU_TO_BASE @ lin_accel_imu
 
-        print(self._a[:3])
-
         # Compute the inverse dynamics
-        tau_no_contact, tau_contact, gravity = self.compute_torques(
+        tau_no_contact, tau_contact = self.compute_torques(
             self._q, self._v, self._a
         )
 
@@ -316,7 +319,7 @@ class InverseDynamics:
             "tau_contact": tau_contact,
             "contact_error": contact_error,
             "no_contact_error": no_contact_error,
-            "gravity": gravity,
+            # "gravity": gravity,
             "acceleration": self._a[leg_indices_v],
         }
 
@@ -334,8 +337,9 @@ if __name__ == "__main__":
     import msgpack  # type: ignore
     from tqdm import tqdm  # type: ignore
 
-    parser = argparse.ArgumentParser(description="Full-body inverse dynamics "
-                                     "using Pinocchio.")
+    parser = argparse.ArgumentParser(
+        description="Whole-body inverse dynamics using Pinocchio."
+    )
 
     parser.add_argument(
         "input_path",
