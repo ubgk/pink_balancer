@@ -167,33 +167,15 @@ class InverseDynamics:
 
         leg_indices_v = self.get_leg_indices("left", "tangent")
 
-        if is_null(a):
-            tau_l_M = np.zeros(3)
-        else:
-            # mypy hint: a is *always* np.ndarray if we get here
-            a = cast(np.ndarray, a)
-
-            # Get the reduced mass matrix M_l_lb (i.e., the mass matrix
-            # of the robot that maps the base and the chosen leg onto
-            # the chosen leg)
-            # M_l_lb s.t. M_l_lb * [a_b; a_l] = M_l * a_l + M_lb * a_b
-            M_l_lb = self.data.M[leg_indices_v, :][
-                :, self.base_indices_v + leg_indices_v
-            ]
-
-            # Forces on the leg due to joint accelerations
-            tau_l_M = M_l_lb @ a[self.base_indices_v + leg_indices_v]
-
-        # Compute the non-linear effects (gravity, Coriolis, centrifugal)
-        tau_l_nle = self.data.nle[leg_indices_v]
-
         # Compute the joint torques
-        tau_no_contact = tau_l_M + tau_l_nle + g[leg_indices_v]
+        tau_no_contact = (pin.rnea(self.model, self.data, q, v, a))[
+            leg_indices_v
+        ]
 
         # Compute the contact forces and project them onto the joints
         tau_contact = tau_no_contact + self.contact_torques(q, v, a)
 
-        return tau_no_contact, tau_contact, g[leg_indices_v], tau_l_nle
+        return tau_no_contact, tau_contact, g[leg_indices_v]
 
     def contact_torques(
         self, q: np.ndarray, v: Optional[np.ndarray], a: Optional[np.ndarray]
@@ -275,7 +257,7 @@ class InverseDynamics:
             # Finite differences to compute the acceleration
             a = v - self._v[joint_idx_v] if dt > 0 else 0.0
             a = a / dt
-            a = 0
+            # a = 0
 
             # Update the values
             self._q[joint_idx_q] = q
@@ -306,11 +288,15 @@ class InverseDynamics:
 
         # Fill in the base acceleration values
         lin_accel_imu = np.array(observation["imu"]["linear_acceleration"])
+        # self._a[0:6] = 0.0  # We don't observe the angular acceleration
+        # self._a[2] = - 9.81  # Gravity in the z direction
+
         self._a[:3] = R_IMU_TO_BASE @ lin_accel_imu
-        self._a[3:6] = 0.0  # We don't observe the angular acceleration
+
+        print(self._a[:3])
 
         # Compute the inverse dynamics
-        tau_no_contact, tau_contact, gravity, nle = self.compute_torques(
+        tau_no_contact, tau_contact, gravity = self.compute_torques(
             self._q, self._v, self._a
         )
 
@@ -322,12 +308,15 @@ class InverseDynamics:
         )
 
         self._log_dict = {
+            "a": self._a,
+            "v": self._v,
+            "q": self._q,
+            "tau_measured": self.tau_measured,
             "tau_no_contact": tau_no_contact,
             "tau_contact": tau_contact,
             "contact_error": contact_error,
             "no_contact_error": no_contact_error,
             "gravity": gravity,
-            "nle": nle,
             "acceleration": self._a[leg_indices_v],
         }
 
